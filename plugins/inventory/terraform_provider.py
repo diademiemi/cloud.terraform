@@ -50,6 +50,12 @@ options:
       - The path of a terraform binary to use.
     type: path
     version_added: 1.1.0
+  workspace:
+    description:
+      - The name of the Terraform workspace to use.
+      - If not specified, the 'default' workspace will be used.
+    type: str
+    version_added: 2.1.0
 """
 
 EXAMPLES = r"""
@@ -117,8 +123,12 @@ from ansible_collections.cloud.terraform.plugins.module_utils.models import (
     TerraformAnsibleProvider,
     TerraformModuleResource,
     TerraformShow,
+    TerraformWorkspaceContext,
 )
-from ansible_collections.cloud.terraform.plugins.module_utils.terraform_commands import TerraformCommands
+from ansible_collections.cloud.terraform.plugins.module_utils.terraform_commands import (
+    TerraformCommands,
+    WorkspaceCommand,
+)
 from ansible_collections.cloud.terraform.plugins.module_utils.utils import validate_bin_path
 
 
@@ -214,6 +224,7 @@ class InventoryModule(BaseInventoryPlugin):  # type: ignore  # mypy ignore
         state_file = cfg.get("state_file", "")
         search_child_modules = cfg.get("search_child_modules", True)
         terraform_binary = cfg.get("binary_path", None)
+        workspace = cfg.get("workspace", "default")
         if terraform_binary is not None:
             validate_bin_path(terraform_binary)
         else:
@@ -221,14 +232,35 @@ class InventoryModule(BaseInventoryPlugin):  # type: ignore  # mypy ignore
 
         # TODO: remove when ansible provider is available
         state_content = []
+        # project_path can be a string or a list of strings
         if isinstance(project_path, str):
             project_path = [project_path]
+        # For every path given
         for path in project_path:
+            # Instantiate TerraformCommands
             terraform = TerraformCommands(module_run_command, path, terraform_binary, False)
+
+            # Try getting workspaces
             try:
-                state_content.append(terraform.show(state_file))
+                workspace_ctx = terraform.workspace_list()
             except TerraformWarning as e:
-                raise TerraformError(e.message)
+                # Default to no custom workspaces
+                workspace_ctx = TerraformWorkspaceContext(current="default", all=[])
+
+            # If given workspace does not exist, raise an error
+            if workspace not in workspace_ctx.all and workspace != workspace_ctx.current:
+                raise TerraformError(f"Workspace {workspace} does not exist in {path}")
+            # If it exists
+            else:
+                # Select the workspace
+                if workspace_ctx.current != workspace:
+                    terraform.workspace(WorkspaceCommand.SELECT, workspace)
+
+                # Add the state content to the list
+                try:
+                    state_content.append(terraform.show(state_file))
+                except TerraformWarning as e:
+                    raise TerraformError(e.message)
 
         if state_content:  # to avoid mypy error: Item "None" of "Optional[TerraformShow]" has no attribute "values"
             self.create_inventory(inventory, state_content, search_child_modules)
