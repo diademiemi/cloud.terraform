@@ -184,11 +184,6 @@ class InventoryModule(BaseInventoryPlugin):  # type: ignore  # mypy ignore
 
     def _add_host(self, inventory: Any, resource: TerraformModuleResource) -> None:
         attributes = TerraformAnsibleProvider.from_json(resource)
-        # Give warning if group already exists (in case of multiple terraform projects)
-        if inventory.get_host(attributes.name):
-            raise TerraformWarning(
-                f"Ansible Host {attributes.name} already exists elsewhere, please check your terraform project(s)"
-            )
         inventory.add_host(attributes.name)
         if attributes.groups:
             for group in attributes.groups:
